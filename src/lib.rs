@@ -4,6 +4,22 @@ use std::ffi::CString;
 use std::convert::TryFrom;
 
 type Synthe<'a> = Symbol<'a, unsafe extern fn(*const c_char, i32, *mut i32) -> *mut u8>;
+
+/// # AquesTalk.dllのラッパー
+/// 基本的な流れとしてはAquesTalk.dllを読み込む→音声データを生成するというように使います
+/// Drop時にAquesTalk_FreeWave()が実行されるため､自分で実行する必要はありません
+/// ## Examples
+/// ```
+/// use testing::AqDLL;
+/// use std::{fs::File, io::Write};
+///
+/// fn main() {
+///     let mut reimu = AqDLL::load("./aquestalk/f1/AquesTalk.dll").unwrap();
+///     let reimuvoice = reimu.synthe("ゆっくりしていってね", 100).unwrap();
+///     let mut file = File::create("./reimu.wav").unwrap();
+///     file.write_all(reimuvoice).unwrap();
+/// }
+/// ```
 pub struct AqDLL<'a>{
     lib: Library,
     synthe: Synthe<'a>,
@@ -11,6 +27,7 @@ pub struct AqDLL<'a>{
 }
 
 impl<'a> AqDLL<'a>{
+    /// AquesTalk.dllを読み込むための関数です｡引数にはAquesTalk.dllのパスを指定してください
     pub fn load<P: AsRef<OsStr>>(filename: P) -> Result<Box<Self>, Box<dyn std::error::Error>>{
         unsafe{
             let aqdll = Box::new(AqDLL{
@@ -23,6 +40,8 @@ impl<'a> AqDLL<'a>{
         }
     }
 
+    /// AquesTalk_Synthe_Utf8と同じです｡第一引数は音声記号列､第二引数は発話速度を50-300で指定します
+    /// 公式にはもう一つsize引数がありますが､これは内部で使ってるので指定する必要はありません
     pub fn synthe(&mut self, koe: &str, ispeed: i32) -> Result<&mut [u8],Box<dyn std::error::Error>>{
         unsafe{
             let koe2 = CString::new(koe)?;
