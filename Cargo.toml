@@ -2,6 +2,11 @@
 name = "aquestalk_rs"
 version = "0.1.0"
 edition = "2018"
+license-file = "LICENSE"
+homepage = "https://winlinux1028.github.io/"
+repository = "https://github.com/WinLinux1028/aquestalk_rs"
+description = "AquesTalkをRustで安全に使えるようにするラッパー"
+authors = ["WinLinux1028 <WinLinux1028@github.com>"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
