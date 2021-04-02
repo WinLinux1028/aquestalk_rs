@@ -8,7 +8,6 @@ type FreeWav<'a> = Symbol<'a, unsafe extern fn(*mut u8)>;
 
 /// # AquesTalk.dllのラッパー
 /// 基本的な流れとしてはAquesTalk.dllを読み込む→音声データを生成するというように使います
-/// Drop時にAquesTalk_FreeWave()が実行されるため､自分で実行する必要はありません
 /// ## Examples
 /// ```
 /// use testing::AqDLL;
@@ -50,7 +49,7 @@ impl<'a> AqDLL<'a>{
 
     /// AquesTalk_Synthe_Utf8と同じです｡第一引数は音声記号列､第二引数は発話速度を50-300で指定します
     /// 公式にはもう一つsize引数がありますが､これは内部で使ってるので指定する必要はありません
-    pub fn synthe<'b>(&'a self, koe: &str, ispeed: i32) -> Result<AqWav<'b>,Box<dyn std::error::Error>>{
+    pub fn synthe<'b>(&'a self, koe: &str, ispeed: i32) -> Result<AqWAV<'b>,Box<dyn std::error::Error>>{
         unsafe{
             let koe2 = CString::new(koe)?;
             let mut size = 0;
@@ -58,7 +57,7 @@ impl<'a> AqDLL<'a>{
             if wav.is_null(){
                 Err(Box::new(AquesTalkErr(size)))
             } else {
-                Ok(AqWav{
+                Ok(AqWAV{
                     wav: std::slice::from_raw_parts_mut(wav, TryFrom::try_from(size)?),
                     dll: Arc::clone(&*(&self.dll as *const _ as *mut Arc<AqDLL2>)),
                 })
@@ -67,13 +66,15 @@ impl<'a> AqDLL<'a>{
     }
 }
 
-/// synthe関数で生成されたwavデータへのスマートポインタです
-pub struct AqWav<'a>{
+/// # synthe関数で生成されたwavデータへのスマートポインタ
+/// このスマートポインタを参照外しするとWAVデータのスライスが出てきます
+/// AquesTalk_FreeWaveはDrop時に実行されるため､自分で実行する必要はありません
+pub struct AqWAV<'a>{
     wav: &'a mut [u8],
     dll: Arc<AqDLL2<'a>>,
 }
 
-impl<'a> std::ops::Deref for AqWav<'a>{
+impl<'a> std::ops::Deref for AqWAV<'a>{
     type Target = &'a mut [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -81,13 +82,13 @@ impl<'a> std::ops::Deref for AqWav<'a>{
     }
 }
 
-impl<'a> std::ops::DerefMut for AqWav<'a> {
+impl<'a> std::ops::DerefMut for AqWAV<'a> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.wav
     }
 }
 
-impl<'a> std::ops::Drop for AqWav<'a> {
+impl<'a> std::ops::Drop for AqWAV<'a> {
     fn drop(&mut self){
         unsafe {
             (self.dll.freewav)(&mut self.wav[0] as *mut u8);
