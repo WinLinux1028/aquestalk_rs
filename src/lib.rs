@@ -1,9 +1,10 @@
 use libloading::{Library, Symbol};
-use std::{ffi::OsStr, mem::MaybeUninit, os::raw::c_char};
+use std::{ffi::OsStr, mem::MaybeUninit, os::raw::c_char, sync::Arc};
 use std::ffi::CString;
 use std::convert::TryFrom;
 
 type Synthe<'a> = Symbol<'a, unsafe extern fn(*const c_char, i32, *mut i32) -> *mut u8>;
+type FreeWav<'a> = Symbol<'a, unsafe extern fn(*mut u8)>;
 
 /// # AquesTalk.dllのラッパー
 /// 基本的な流れとしてはAquesTalk.dllを読み込む→音声データを生成するというように使います
@@ -17,57 +18,82 @@ type Synthe<'a> = Symbol<'a, unsafe extern fn(*const c_char, i32, *mut i32) -> *
 ///     let mut reimu = AqDLL::load("./aquestalk/f1/AquesTalk.dll").unwrap();
 ///     let reimuvoice = reimu.synthe("ゆっくりしていってね", 100).unwrap();
 ///     let mut file = File::create("./reimu.wav").unwrap();
-///     file.write_all(reimuvoice).unwrap();
+///     file.write_all(*reimuvoice).unwrap();
 /// }
 /// ```
 pub struct AqDLL<'a>{
+    dll: Arc<AqDLL2<'a>>,
+}
+
+struct AqDLL2<'a>{
     lib: Library,
     synthe: Synthe<'a>,
-    data: Vec<*mut u8>,
+    freewav: FreeWav<'a>
 }
 
 impl<'a> AqDLL<'a>{
     /// AquesTalk.dllを読み込むための関数です｡引数にはAquesTalk.dllのパスを指定してください
-    pub fn load<P: AsRef<OsStr>>(filename: P) -> Result<Box<Self>, Box<dyn std::error::Error>>{
+    pub fn load<P: AsRef<OsStr>>(filename: P) -> Result<Self, Box<dyn std::error::Error>>{
         unsafe{
-            let aqdll = Box::new(AqDLL{
-                lib: Library::new(filename)?,
-                synthe: MaybeUninit::uninit().assume_init(),
-                data: Vec::new(),
-            });
-            *(&aqdll.synthe as *const _ as *mut Synthe) = aqdll.lib.get(b"AquesTalk_Synthe_Utf8")?;
+            let aqdll = AqDLL{
+                dll: Arc::new(AqDLL2{
+                    lib: Library::new(filename)?,
+                    synthe: MaybeUninit::uninit().assume_init(),
+                    freewav: MaybeUninit::uninit().assume_init(),
+                }),
+            };
+            *(&aqdll.dll.synthe as *const _ as *mut Synthe) = aqdll.dll.lib.get(b"AquesTalk_Synthe_Utf8")?;
+            *(&aqdll.dll.freewav as *const _ as *mut FreeWav) = aqdll.dll.lib.get(b"AquesTalk_FreeWave")?;
             Ok(aqdll)
         }
     }
 
     /// AquesTalk_Synthe_Utf8と同じです｡第一引数は音声記号列､第二引数は発話速度を50-300で指定します
     /// 公式にはもう一つsize引数がありますが､これは内部で使ってるので指定する必要はありません
-    pub fn synthe(&mut self, koe: &str, ispeed: i32) -> Result<&mut [u8],Box<dyn std::error::Error>>{
+    pub fn synthe<'b>(&'a self, koe: &str, ispeed: i32) -> Result<AqWav<'b>,Box<dyn std::error::Error>>{
         unsafe{
             let koe2 = CString::new(koe)?;
             let mut size = 0;
-            let wav = (self.synthe)(koe2.as_ptr(), ispeed, &mut size as *mut _);
+            let wav = (self.dll.synthe)(koe2.as_ptr(), ispeed, &mut size as *mut _);
             if wav.is_null(){
                 Err(Box::new(AquesTalkErr(size)))
             } else {
-                self.data.push(wav);
-                Ok(std::slice::from_raw_parts_mut(wav, TryFrom::try_from(size)?))
-            }   
-        }
-    }
-}
-
-impl<'a> std::ops::Drop for AqDLL<'a> {
-    fn drop(&mut self){
-        unsafe {
-            let freewave: Symbol<unsafe extern fn(*mut u8)> = self.lib.get(b"AquesTalk_FreeWave").unwrap();
-            for i in &self.data {
-                (freewave)(*i);
+                Ok(AqWav{
+                    wav: std::slice::from_raw_parts_mut(wav, TryFrom::try_from(size)?),
+                    dll: Arc::clone(&*(&self.dll as *const _ as *mut Arc<AqDLL2>)),
+                })
             }
         }
     }
 }
 
+/// synthe関数で生成されたwavデータへのスマートポインタです
+pub struct AqWav<'a>{
+    wav: &'a mut [u8],
+    dll: Arc<AqDLL2<'a>>,
+}
+
+impl<'a> std::ops::Deref for AqWav<'a>{
+    type Target = &'a mut [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.wav
+    }
+}
+
+impl<'a> std::ops::DerefMut for AqWav<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.wav
+    }
+}
+
+impl<'a> std::ops::Drop for AqWav<'a> {
+    fn drop(&mut self){
+        unsafe {
+            (self.dll.freewav)(&mut self.wav[0] as *mut _);
+        }
+    }
+}
 
 struct AquesTalkErr(i32);
 
