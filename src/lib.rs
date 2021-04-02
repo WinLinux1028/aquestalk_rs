@@ -54,7 +54,7 @@ impl<'a> AqDLL<'a>{
         unsafe{
             let koe2 = CString::new(koe)?;
             let mut size = 0;
-            let wav = (self.dll.synthe)(koe2.as_ptr(), ispeed, &mut size as *mut _);
+            let wav = (self.dll.synthe)(koe2.as_ptr(), ispeed, &mut size as *mut i32);
             if wav.is_null(){
                 Err(Box::new(AquesTalkErr(size)))
             } else {
@@ -90,7 +90,7 @@ impl<'a> std::ops::DerefMut for AqWav<'a> {
 impl<'a> std::ops::Drop for AqWav<'a> {
     fn drop(&mut self){
         unsafe {
-            (self.dll.freewav)(&mut self.wav[0] as *mut _);
+            (self.dll.freewav)(&mut self.wav[0] as *mut u8);
         }
     }
 }
