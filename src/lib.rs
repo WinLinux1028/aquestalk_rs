@@ -14,11 +14,11 @@
 /// ```
 pub mod aquestalk1{
     use libloading::{Library, Symbol};
-    use std::{mem::MaybeUninit, os::raw::c_char, sync::Arc, ffi::{CString, OsStr}, convert::TryFrom};
+    use std::{convert::TryFrom, ffi::{CString, OsStr}, mem::MaybeUninit, os::raw::c_char, sync::Arc};
     type AqSynthe<'a> = Symbol<'a, unsafe extern fn(*const c_char, i32, *mut i32) -> *mut u8>;
     type AqFreeWav<'a> = Symbol<'a, unsafe extern fn(*mut u8)>;
 
-    /// # DLL内の関数にアクセスするためのラッパー
+    /// DLL内の関数にアクセスするためのラッパー
     pub struct AqDLL<'a>{
         dll: Arc<AqDLL2<'a>>,
     }
@@ -155,7 +155,7 @@ pub mod aquestalk1{
 /// ```
 pub mod aqkanji2koe{
     use libloading::{Library, Symbol};
-    use std::{mem::MaybeUninit, os::raw::c_char, sync::Arc, ffi::{CString, CStr, c_void, OsStr}, alloc, convert::TryFrom, mem};
+    use std::{alloc, convert::TryFrom, ffi::{CString, CStr, c_void, OsStr}, mem::MaybeUninit, mem, os::raw::c_char, sync::Arc};
     type AqK2Kcreate<'a> = Symbol<'a, unsafe extern fn(*const c_char, *mut i32) -> *mut c_void>;
     type AqK2Kcreateptr<'a> = Symbol<'a, unsafe extern fn(*const c_void, *const c_void, *mut i32) -> *mut c_void>;
     type AqK2Krelease<'a> = Symbol<'a, unsafe extern fn(*mut c_void)>;
@@ -177,7 +177,7 @@ pub mod aqkanji2koe{
     }
 
     impl<'a> AqK2KDLL<'a>{
-        /// 第一引数にはAqKanji2Koe.dllのパスを､第二引数には開発ライセンスキーを持っていれば `Some("(ライセンスキー)")` を､持っていなければ `None` を指定してください
+        /// 第一引数にはAqKanji2Koe.dllのパスを､第二引数には開発ライセンスキーを持っていればSome("(ライセンスキー)")を､持っていなければNoneを指定してください
         /// なお､この制限解除機能は私は製品版を持ってなくてテストしていないので､動作保証はありません(不具合があったら私に製品版をプレゼントするなり､Githubにプルリク投げるなりしてください)
         pub fn load<P: AsRef<OsStr>>(dllpath: P, devkey: Option<&str>) -> Result<Self, Box<dyn std::error::Error>>{
             unsafe{
@@ -254,7 +254,7 @@ pub mod aqkanji2koe{
 
     impl<'a> AqK2Kinstance<'a>{
         /// 本家のAqKanji2Koe_Convert_utf8に当たります
-        /// 第一引数には漢字かな混じりのテキストを､第二引数はバッファーサイズで､基本的には `None` を入れとけば公式推奨の入力テキストの２倍を確保しますが､心配性の方は `Some(バイト単位のバッファーサイズ)` を指定してください
+        /// 第一引数には漢字かな混じりのテキストを､第二引数はバッファーサイズで､基本的にはNoneを入れとけば公式推奨の入力テキストの２倍を確保しますが､心配性の方はSome(バイト単位のバッファーサイズ)を指定してください
         pub fn convert<'b>(&mut self, kanji: &str, buffersize: Option<usize>) -> Result<AqK2Kstr<'b>,Box<dyn std::error::Error>> {
             unsafe{
                 let mut size: usize = match buffersize {
@@ -289,6 +289,10 @@ pub mod aqkanji2koe{
             }
         }
     }
+
+    unsafe impl<'a> Send for AqK2Kinstance<'a>{}
+
+    unsafe impl<'a> Sync for AqK2Kinstance<'a>{}
 
     /// # convert関数で生成された文字列へのスマートポインタ
     /// このスマートポインタを参照外しすると変換された文字列が出てきます
