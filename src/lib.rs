@@ -168,6 +168,8 @@ pub mod aqkanji2koe{
     }
 
     struct AqK2KDLL2<'a>{
+        #[allow(dead_code)]
+        cpp: Option<Library>,
         lib: Library,
         create: AqK2Kcreate<'a>,
         create_ptr: AqK2Kcreateptr<'a>,
@@ -181,8 +183,10 @@ pub mod aqkanji2koe{
         /// なお､この制限解除機能は私は製品版を持ってなくてテストしていないので､動作保証はありません(不具合があったら私に製品版をプレゼントするなり､Githubにプルリク投げるなりしてください)
         pub fn load<P: AsRef<OsStr>>(dllpath: P, devkey: Option<&str>) -> Result<Self, Box<dyn std::error::Error>>{
             unsafe{
+                let libcpp = Self::cpp()?;
                 let dll = AqK2KDLL{
                     dll: Arc::new(AqK2KDLL2{
+                        cpp: libcpp,
                         lib: Library::new(dllpath)?,
                         create: MaybeUninit::uninit().assume_init(),
                         create_ptr: MaybeUninit::uninit().assume_init(),
@@ -202,12 +206,31 @@ pub mod aqkanji2koe{
                 *(&dll.dll.create as *const _ as *mut AqK2Kcreate) = dll.dll.lib.get(b"AqKanji2Koe_Create")?;
                 *(&dll.dll.create_ptr as *const _ as *mut AqK2Kcreateptr) = dll.dll.lib.get(b"AqKanji2Koe_Create_Ptr")?;
                 *(&dll.dll.release as *const _ as *mut AqK2Krelease) = dll.dll.lib.get(b"AqKanji2Koe_Release")?;
-                *(&dll.dll.convert as *const _ as *mut AqK2Kconvert) = match platform_win() {
-                    true => dll.dll.lib.get(b"AqKanji2Koe_Convert_utf8")?,
-                    false => dll.dll.lib.get(b"AqKanji2Koe_Convert")?,
-                };
+                *(&dll.dll.convert as *const _ as *mut AqK2Kconvert) = dll.dll.lib.get(Self::conv())?;
                 Ok(dll)
             }
+        }
+
+        #[cfg(target_os = "linux")]
+        pub fn cpp() -> Result<Option<Library>, Box<dyn std::error::Error>> {
+            unsafe {
+                Ok(Some(Library::from(libloading::os::unix::Library::open(Some("libstdc++.so.6"), libloading::os::unix::RTLD_LAZY | libloading::os::unix::RTLD_GLOBAL)?)))
+            }
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        pub fn cpp() -> Result<Option<Library>, Box<dyn std::error::Error>> {
+            Ok(None)
+        }
+
+        #[cfg(target_os = "windows")]
+        pub fn conv() -> &'static [u8] {
+            b"AqKanji2Koe_Convert_utf8"
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        pub fn conv() -> &'static [u8] {
+            b"AqKanji2Koe_Convert"
         }
 
         /// 本家のAqKanji2Koe_Createに当たります
@@ -358,15 +381,5 @@ pub mod aqkanji2koe{
         fn description(&self) -> &str {
             self.msg()
         }
-    }
-
-    #[cfg(target_os = "windows")]
-    fn platform_win() -> bool {
-        true
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    fn platform_win() -> bool {
-        false
     }
 }
