@@ -212,24 +212,24 @@ pub mod aqkanji2koe{
         }
 
         #[cfg(target_os = "linux")]
-        pub fn cpp() -> Result<Option<Library>, Box<dyn std::error::Error>> {
+        fn cpp() -> Result<Option<Library>, Box<dyn std::error::Error>> {
             unsafe {
                 Ok(Some(Library::from(libloading::os::unix::Library::open(Some("libstdc++.so.6"), libloading::os::unix::RTLD_LAZY | libloading::os::unix::RTLD_GLOBAL)?)))
             }
         }
 
         #[cfg(not(target_os = "linux"))]
-        pub fn cpp() -> Result<Option<Library>, Box<dyn std::error::Error>> {
+        fn cpp() -> Result<Option<Library>, Box<dyn std::error::Error>> {
             Ok(None)
         }
 
         #[cfg(target_os = "windows")]
-        pub fn conv() -> &'static [u8] {
+        fn conv() -> &'static [u8] {
             b"AqKanji2Koe_Convert_utf8"
         }
 
         #[cfg(not(target_os = "windows"))]
-        pub fn conv() -> &'static [u8] {
+        fn conv() -> &'static [u8] {
             b"AqKanji2Koe_Convert"
         }
 
