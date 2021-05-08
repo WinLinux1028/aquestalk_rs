@@ -12,52 +12,66 @@
 ///     file.write_all(*reimuvoice).unwrap();
 /// }
 /// ```
-pub mod aquestalk1{
+#[allow(clippy::needless_doctest_main)]
+pub mod aquestalk1 {
     use libloading::{Library, Symbol};
-    use std::{convert::TryFrom, ffi::{CString, OsStr}, mem::MaybeUninit, os::raw::c_char, sync::Arc};
-    type AqSynthe<'a> = Symbol<'a, unsafe extern fn(*const c_char, i32, *mut i32) -> *mut u8>;
-    type AqFreeWav<'a> = Symbol<'a, unsafe extern fn(*mut u8)>;
+    use safety_breaker::{force_convert, ForceMut};
+    use std::{
+        convert::TryFrom,
+        ffi::{CString, OsStr},
+        mem::MaybeUninit,
+        os::raw::c_char,
+        sync::Arc,
+    };
+    type AqSynthe<'a> = Symbol<'a, unsafe extern "C" fn(*const c_char, i32, *mut i32) -> *mut u8>;
+    type AqFreeWav<'a> = Symbol<'a, unsafe extern "C" fn(*mut u8)>;
 
     /// DLL内の関数にアクセスするためのラッパー
-    pub struct AqDLL<'a>{
+    pub struct AqDLL<'a> {
         dll: Arc<AqDLL2<'a>>,
     }
 
-    struct AqDLL2<'a>{
+    struct AqDLL2<'a> {
         lib: Library,
         synthe: AqSynthe<'a>,
-        freewav: AqFreeWav<'a>
+        freewav: AqFreeWav<'a>,
     }
 
-    impl<'a> AqDLL<'a>{
+    impl<'a> AqDLL<'a> {
         /// AquesTalk.dllを読み込むための関数です｡引数にはAquesTalk.dllのパスを指定してください
-        pub fn load<P: AsRef<OsStr>>(dllpath: P) -> Result<Self, Box<dyn std::error::Error>>{
-            unsafe{
-                let dll = AqDLL{
-                    dll: Arc::new(AqDLL2{
+        #[allow(clippy::uninit_assumed_init)]
+        pub fn load<P: AsRef<OsStr>>(dllpath: P) -> Result<Self, Box<dyn std::error::Error>> {
+            unsafe {
+                let dll = AqDLL {
+                    dll: Arc::new(AqDLL2 {
                         lib: Library::new(dllpath)?,
                         synthe: MaybeUninit::uninit().assume_init(),
                         freewav: MaybeUninit::uninit().assume_init(),
                     }),
                 };
-                *(&dll.dll.synthe as *const _ as *mut AqSynthe) = dll.dll.lib.get(b"AquesTalk_Synthe_Utf8")?;
-                *(&dll.dll.freewav as *const _ as *mut AqFreeWav) = dll.dll.lib.get(b"AquesTalk_FreeWave")?;
+                *dll.dll.synthe.forcemut() = dll.dll.lib.get(b"AquesTalk_Synthe_Utf8")?;
+                *dll.dll.freewav.forcemut() = dll.dll.lib.get(b"AquesTalk_FreeWave")?;
                 Ok(dll)
             }
         }
 
         /// AquesTalk_Synthe_Utf8と同じです｡第一引数は音声記号列､第二引数は発話速度を50-300で指定します
-        pub fn synthe<'b>(&self, koe: &str, ispeed: i32) -> Result<AqWAV<'b>,Box<dyn std::error::Error>>{
-            unsafe{
+        pub fn synthe<'b>(
+            &self,
+            koe: &str,
+            ispeed: i32,
+        ) -> Result<AqWAV<'b>, Box<dyn std::error::Error>> {
+            unsafe {
                 let koe2 = CString::new(koe)?;
                 let mut size = 0;
                 let wav = (self.dll.synthe)(koe2.as_ptr(), ispeed, &mut size as *mut i32);
-                if wav.is_null(){
+                if wav.is_null() {
                     Err(Box::new(AqErr(size)))
                 } else {
-                    Ok(AqWAV{
+                    Ok(AqWAV {
                         wav: std::slice::from_raw_parts_mut(wav, TryFrom::try_from(size)?),
-                        dll: Arc::clone(&*(&self.dll as *const _ as *mut Arc<AqDLL2>)),
+                        // dll: Arc::clone(&*(&self.dll as *const _ as *mut Arc<AqDLL2>)),
+                        dll: Arc::clone(force_convert!(&self.dll, Arc<AqDLL2>)),
                     })
                 }
             }
@@ -67,12 +81,12 @@ pub mod aquestalk1{
     /// # synthe関数で生成されたwavデータへのスマートポインタ
     /// このスマートポインタを参照外しするとWAVデータのスライスが出てきます
     /// AquesTalk_FreeWaveはDrop時に実行されるため､自分で実行する必要はありません
-    pub struct AqWAV<'a>{
+    pub struct AqWAV<'a> {
         wav: &'a mut [u8],
         dll: Arc<AqDLL2<'a>>,
     }
 
-    impl<'a> std::ops::Deref for AqWAV<'a>{
+    impl<'a> std::ops::Deref for AqWAV<'a> {
         type Target = &'a mut [u8];
 
         fn deref(&self) -> &Self::Target {
@@ -87,7 +101,7 @@ pub mod aquestalk1{
     }
 
     impl<'a> std::ops::Drop for AqWAV<'a> {
-        fn drop(&mut self){
+        fn drop(&mut self) {
             unsafe {
                 (self.dll.freewav)(&mut self.wav[0] as *mut u8);
             }
@@ -96,8 +110,8 @@ pub mod aquestalk1{
 
     struct AqErr(i32);
 
-    impl AqErr{
-        fn msg(&self) -> &str{
+    impl AqErr {
+        fn msg(&self) -> &str {
             match self.0 {
                 100 => "その他のエラー, エラーコード: 100",
                 101 => "メモリ不足, エラーコード: 101",
@@ -109,7 +123,9 @@ pub mod aquestalk1{
                 107 => "タグの長さが制限を越えている（または[>]がみつからない）, エラーコード: 107",
                 108 => "タグ内の値の指定が正しくない, エラーコード: 108",
                 109 => "WAVE再生ができない（サウンドドライバ関連の問題）, エラーコード: 109",
-                110 => "WAVE再生ができない（サウンドドライバ関連の問題非同期再生）, エラーコード: 110",
+                110 => {
+                    "WAVE再生ができない（サウンドドライバ関連の問題非同期再生）, エラーコード: 110"
+                }
                 111 => "発声すべきデータがない, エラーコード: 111",
                 200 => "音声記号列が長すぎる, エラーコード: 200",
                 201 => "１つのフレーズ中の読み記号が多すぎる, エラーコード: 201",
@@ -153,21 +169,33 @@ pub mod aquestalk1{
 ///     println!("{}", *word);
 /// }
 /// ```
-pub mod aqkanji2koe{
+#[allow(clippy::needless_doctest_main)]
+pub mod aqkanji2koe {
     use libloading::{Library, Symbol};
-    use std::{alloc, convert::TryFrom, ffi::{CString, CStr, c_void, OsStr}, mem::MaybeUninit, mem, os::raw::c_char, sync::Arc};
-    type AqK2Kcreate<'a> = Symbol<'a, unsafe extern fn(*const c_char, *mut i32) -> *mut c_void>;
-    type AqK2Kcreateptr<'a> = Symbol<'a, unsafe extern fn(*const c_void, *const c_void, *mut i32) -> *mut c_void>;
-    type AqK2Krelease<'a> = Symbol<'a, unsafe extern fn(*mut c_void)>;
-    type AqK2Ksetdevkey<'a> = Symbol<'a, unsafe extern fn(*const c_char) -> i32>;
-    type AqK2Kconvert<'a> = Symbol<'a, unsafe extern fn(*mut c_void, *const c_char, *mut c_char, i32) -> i32>;
+    use safety_breaker::{force_convert, ForceMut};
+    use std::{
+        alloc,
+        convert::TryFrom,
+        ffi::{c_void, CStr, CString, OsStr},
+        mem,
+        mem::MaybeUninit,
+        os::raw::c_char,
+        sync::Arc,
+    };
+    type AqK2Kcreate<'a> = Symbol<'a, unsafe extern "C" fn(*const c_char, *mut i32) -> *mut c_void>;
+    type AqK2Kcreateptr<'a> =
+        Symbol<'a, unsafe extern "C" fn(*const c_void, *const c_void, *mut i32) -> *mut c_void>;
+    type AqK2Krelease<'a> = Symbol<'a, unsafe extern "C" fn(*mut c_void)>;
+    type AqK2Ksetdevkey<'a> = Symbol<'a, unsafe extern "C" fn(*const c_char) -> i32>;
+    type AqK2Kconvert<'a> =
+        Symbol<'a, unsafe extern "C" fn(*mut c_void, *const c_char, *mut c_char, i32) -> i32>;
 
     /// # DLL内の基本的な関数にアクセスするためのラッパー
-    pub struct AqK2KDLL<'a>{
+    pub struct AqK2KDLL<'a> {
         dll: Arc<AqK2KDLL2<'a>>,
     }
 
-    struct AqK2KDLL2<'a>{
+    struct AqK2KDLL2<'a> {
         #[allow(dead_code)]
         cpp: Option<Library>,
         lib: Library,
@@ -178,14 +206,18 @@ pub mod aqkanji2koe{
         setdevkey: AqK2Ksetdevkey<'a>,
     }
 
-    impl<'a> AqK2KDLL<'a>{
+    impl<'a> AqK2KDLL<'a> {
         /// 第一引数にはAqKanji2Koe.dllのパスを､第二引数には開発ライセンスキーを持っていればSome("(ライセンスキー)")を､持っていなければNoneを指定してください
         /// なお､この制限解除機能は私は製品版を持ってなくてテストしていないので､動作保証はありません(不具合があったら私に製品版をプレゼントするなり､Githubにプルリク投げるなりしてください)
-        pub fn load<P: AsRef<OsStr>>(dllpath: P, devkey: Option<&str>) -> Result<Self, Box<dyn std::error::Error>>{
-            unsafe{
+        #[allow(clippy::uninit_assumed_init)]
+        pub fn load<P: AsRef<OsStr>>(
+            dllpath: P,
+            devkey: Option<&str>,
+        ) -> Result<Self, Box<dyn std::error::Error>> {
+            unsafe {
                 let libcpp = Self::cpp()?;
-                let dll = AqK2KDLL{
-                    dll: Arc::new(AqK2KDLL2{
+                let dll = AqK2KDLL {
+                    dll: Arc::new(AqK2KDLL2 {
                         cpp: libcpp,
                         lib: Library::new(dllpath)?,
                         create: MaybeUninit::uninit().assume_init(),
@@ -195,18 +227,15 @@ pub mod aqkanji2koe{
                         setdevkey: MaybeUninit::uninit().assume_init(),
                     }),
                 };
-                *(&dll.dll.setdevkey as *const _ as *mut AqK2Ksetdevkey) = dll.dll.lib.get(b"AqKanji2Koe_SetDevKey")?;
-                match devkey {
-                    Some(s) => {
-                        let s2 = CString::new(s)?;
-                        let _ = (dll.dll.setdevkey)(s2.as_ptr());
-                    },
-                    None => (),
+                *dll.dll.setdevkey.forcemut() = dll.dll.lib.get(b"AqKanji2Koe_SetDevKey")?;
+                if let Some(s) = devkey {
+                    let s2 = CString::new(s)?;
+                    let _ = (dll.dll.setdevkey)(s2.as_ptr());
                 }
-                *(&dll.dll.create as *const _ as *mut AqK2Kcreate) = dll.dll.lib.get(b"AqKanji2Koe_Create")?;
-                *(&dll.dll.create_ptr as *const _ as *mut AqK2Kcreateptr) = dll.dll.lib.get(b"AqKanji2Koe_Create_Ptr")?;
-                *(&dll.dll.release as *const _ as *mut AqK2Krelease) = dll.dll.lib.get(b"AqKanji2Koe_Release")?;
-                *(&dll.dll.convert as *const _ as *mut AqK2Kconvert) = dll.dll.lib.get(Self::conv())?;
+                *dll.dll.create.forcemut() = dll.dll.lib.get(b"AqKanji2Koe_Create")?;
+                *dll.dll.create_ptr.forcemut() = dll.dll.lib.get(b"AqKanji2Koe_Create_Ptr")?;
+                *dll.dll.release.forcemut() = dll.dll.lib.get(b"AqKanji2Koe_Release")?;
+                *dll.dll.convert.forcemut() = dll.dll.lib.get(Self::conv())?;
                 Ok(dll)
             }
         }
@@ -214,7 +243,10 @@ pub mod aqkanji2koe{
         #[cfg(target_os = "linux")]
         fn cpp() -> Result<Option<Library>, Box<dyn std::error::Error>> {
             unsafe {
-                Ok(Some(Library::from(libloading::os::unix::Library::open(Some("libstdc++.so.6"), libloading::os::unix::RTLD_LAZY | libloading::os::unix::RTLD_GLOBAL)?)))
+                Ok(Some(Library::from(libloading::os::unix::Library::open(
+                    Some("libstdc++.so.6"),
+                    libloading::os::unix::RTLD_LAZY | libloading::os::unix::RTLD_GLOBAL,
+                )?)))
             }
         }
 
@@ -235,7 +267,10 @@ pub mod aqkanji2koe{
 
         /// 本家のAqKanji2Koe_Createに当たります
         /// 引数には辞書のあるディレクトリを指定してください
-        pub fn create<'b>(&self, pathdic: &str) -> Result<AqK2Kinstance<'b>,Box<dyn std::error::Error>> {
+        pub fn create<'b>(
+            &self,
+            pathdic: &str,
+        ) -> Result<AqK2Kinstance<'b>, Box<dyn std::error::Error>> {
             let mut errcode: i32 = 0;
             let pathdic2 = CString::new(pathdic)?;
             unsafe {
@@ -243,9 +278,9 @@ pub mod aqkanji2koe{
                 if instance.is_null() {
                     Err(Box::new(AqK2Kerr(errcode)))
                 } else {
-                    Ok(AqK2Kinstance{
-                        instance: instance,
-                        dll: Arc::clone(&*(&self.dll as *const _ as *mut Arc<AqK2KDLL2>)),
+                    Ok(AqK2Kinstance {
+                        instance,
+                        dll: Arc::clone(force_convert!(&self.dll, Arc<AqK2KDLL2>)),
                     })
                 }
             }
@@ -254,15 +289,21 @@ pub mod aqkanji2koe{
         /// 本家のAqKanji2Koe_Create_Ptrに当たります
         /// 第一引数にはシステム辞書の先頭アドレスを､第二引数にはユーザ辞書の先頭アドレスを指定してください
         /// インスタンスの開放は自動で行いますが､辞書の開放は手動でしてください
-        pub unsafe fn create_ptr<'b>(&self, sysdic: *const c_void, userdic: *const c_void) -> Result<AqK2Kinstance<'b>,Box<dyn std::error::Error>> {
+        #[allow(clippy::missing_safety_doc)]
+        pub unsafe fn create_ptr<'b>(
+            &self,
+            sysdic: *const c_void,
+            userdic: *const c_void,
+        ) -> Result<AqK2Kinstance<'b>, Box<dyn std::error::Error>> {
             let mut errcode: i32 = 0;
             let instance = (self.dll.create_ptr)(sysdic, userdic, &mut errcode as *mut i32);
             if instance.is_null() {
                 Err(Box::new(AqK2Kerr(errcode)))
             } else {
-                Ok(AqK2Kinstance{
-                    instance: instance,
-                    dll: Arc::clone(&*(&self.dll as *const _ as *mut Arc<AqK2KDLL2>)),
+                Ok(AqK2Kinstance {
+                    instance,
+                    // dll: Arc::clone(&*(&self.dll as *const _ as *mut Arc<AqK2KDLL2>)),
+                    dll: Arc::clone(force_convert!(&self.dll, Arc<AqK2KDLL2>)),
                 })
             }
         }
@@ -270,33 +311,43 @@ pub mod aqkanji2koe{
 
     /// # createやcreate_ptrが返すAqKanji2Koeのインスタンスのラッパー
     /// AqKanji2Koe_ReleaseはDrop時に実行されるため､自分で実行する必要はありません
-    pub struct AqK2Kinstance<'a>{
+    pub struct AqK2Kinstance<'a> {
         instance: *mut c_void,
         dll: Arc<AqK2KDLL2<'a>>,
     }
 
-    impl<'a> AqK2Kinstance<'a>{
+    impl<'a> AqK2Kinstance<'a> {
         /// 本家のAqKanji2Koe_Convert_utf8に当たります
         /// 第一引数には漢字かな混じりのテキストを､第二引数はバッファーサイズで､基本的にはNoneを入れとけば公式推奨の入力テキストの２倍を確保しますが､心配性の方はSome(バイト単位のバッファーサイズ)を指定してください
-        pub fn convert<'b>(&mut self, kanji: &str, buffersize: Option<usize>) -> Result<AqK2Kstr<'b>,Box<dyn std::error::Error>> {
-            unsafe{
+        pub fn convert<'b>(
+            &mut self,
+            kanji: &str,
+            buffersize: Option<usize>,
+        ) -> Result<AqK2Kstr<'b>, Box<dyn std::error::Error>> {
+            unsafe {
                 let mut size: usize = match buffersize {
                     Some(s) => s,
-                    None => {
-                        (kanji.len()+1)*2
-                    },
+                    None => (kanji.len() + 1) * 2,
                 };
                 if size < 256 {
                     size = 256;
                 }
                 let kanji2 = CString::new(kanji)?;
-                let layout = alloc::Layout::from_size_align_unchecked(mem::size_of::<c_char>()*size, mem::align_of::<c_char>());
+                let layout = alloc::Layout::from_size_align_unchecked(
+                    mem::size_of::<c_char>() * size,
+                    mem::align_of::<c_char>(),
+                );
                 let buffer = alloc::alloc(layout) as *mut c_char;
-                let errcode = (self.dll.convert)(self.instance, kanji2.as_ptr(), buffer, TryFrom::try_from(size)?);
-                if errcode == 0{
-                    Ok(AqK2Kstr{
-                        content: &mut *(CStr::from_ptr(buffer).to_str()? as *const _ as *mut str),
-                        layout: layout,
+                let errcode = (self.dll.convert)(
+                    self.instance,
+                    kanji2.as_ptr(),
+                    buffer,
+                    TryFrom::try_from(size)?,
+                );
+                if errcode == 0 {
+                    Ok(AqK2Kstr {
+                        content: CStr::from_ptr(buffer).to_str()?.forcemut(),
+                        layout,
                     })
                 } else {
                     Err(Box::new(AqK2Kerr(errcode)))
@@ -306,26 +357,26 @@ pub mod aqkanji2koe{
     }
 
     impl<'a> std::ops::Drop for AqK2Kinstance<'a> {
-        fn drop(&mut self){
+        fn drop(&mut self) {
             unsafe {
                 (self.dll.release)(self.instance);
             }
         }
     }
 
-    unsafe impl<'a> Send for AqK2Kinstance<'a>{}
+    unsafe impl<'a> Send for AqK2Kinstance<'a> {}
 
-    unsafe impl<'a> Sync for AqK2Kinstance<'a>{}
+    unsafe impl<'a> Sync for AqK2Kinstance<'a> {}
 
     /// # convert関数で生成された文字列へのスマートポインタ
     /// このスマートポインタを参照外しすると変換された文字列が出てきます
     /// ヒープの開放はDrop時に実行されるため､自分で実行する必要はありません
-    pub struct AqK2Kstr<'a>{
+    pub struct AqK2Kstr<'a> {
         content: &'a mut str,
         layout: alloc::Layout,
     }
 
-    impl<'a> std::ops::Deref for AqK2Kstr<'a>{
+    impl<'a> std::ops::Deref for AqK2Kstr<'a> {
         type Target = &'a mut str;
 
         fn deref(&self) -> &Self::Target {
@@ -340,7 +391,7 @@ pub mod aqkanji2koe{
     }
 
     impl<'a> std::ops::Drop for AqK2Kstr<'a> {
-        fn drop(&mut self){
+        fn drop(&mut self) {
             unsafe {
                 alloc::dealloc(&mut self.content.as_bytes_mut()[0] as *mut u8, self.layout);
             }
@@ -349,8 +400,8 @@ pub mod aqkanji2koe{
 
     struct AqK2Kerr(i32);
 
-    impl AqK2Kerr{
-        fn msg(&self) -> &str{
+    impl AqK2Kerr {
+        fn msg(&self) -> &str {
             match self.0 {
                 100 => "その他のエラー, エラーコード: 100",
                 101 => "関数呼び出し時の引数がNULLになっている, エラーコード: 101",

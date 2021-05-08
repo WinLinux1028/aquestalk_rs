@@ -1,6 +1,6 @@
 [package]
 name = "aquestalk_rs"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2018"
 license-file = "LICENSE"
 homepage = "https://winlinux1028.github.io/"
@@ -12,3 +12,4 @@ authors = ["WinLinux1028 <WinLinux1028@github.com>"]
 
 [dependencies]
 libloading = "0.7"
+safety_breaker = "0.1"
